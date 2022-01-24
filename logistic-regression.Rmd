@@ -1,0 +1,546 @@
+---
+title: "Logistic Regression"
+author: "Josh Murray"
+date: "23/01/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction
+
+We used both the `lm()` function and `glm()` function to run linear regression models. We need to use `glm()`, which stands for Generalized Linear Models. We will focus more on GLM's in our next lecture, but for now we can use it without knowing why we are specifying a link function in addition to a family. 
+
+Recall that our logistic regressin is specified as:
+
+$$log\Big(\frac{p(x)}{1-p(x)}\Big) = \boxed{\alpha + \beta_1 x_1 + \dots \beta_p x_p}$$
+where using the inverse logit we obtain
+
+$$p(x) =\frac{e^{\alpha + \beta_1 x_1 +\dots + \beta_p x_p}}{1 + e^{\alpha + \beta_1 x_1 +\dots + \beta_p x_p}}$$
+
+R comes equipped with a logit (`qlogis()`) and inverse logit (`plogis()`) function. Here we just assign them to names that are slightly easier to remember. 
+
+
+```{r}
+library(tidyverse)
+
+logit <- qlogis
+invlogit <- plogis
+
+```
+
+
+Let's simulate some fake data to build a simple model with
+
+```{r}
+set.seed(5657)
+simulate_logit_model <- function(sample_size = 100, 
+                                 alpha = 2, beta = 1) {
+
+x <- rnorm(sample_size)
+linear_terms = alpha + beta * x
+
+probability <- invlogit(linear_terms)
+y <- rbinom(sample_size, 1, probability)
+return(data.frame(x, y))
+}
+
+alpha <- -1.40
+beta <- 2.33
+fake_data <- simulate_logit_model(200, alpha, beta)
+dim(fake_data)
+head(fake_data)
+```
+
+
+Let's fit a basic model with glm
+
+```{r}
+
+fit <- glm(y ~ x, family=binomial(link="logit"), data=fake_data)
+
+summary(fit)
+
+```
+
+Let's plot the estimated logistic curve against the population curve. 
+
+
+```{r}
+
+fake_data <- fake_data %>% 
+  mutate(population_pr = invlogit(alpha + beta*x))
+
+fake_data %>% 
+  ggplot(aes(x, y)) +
+  geom_point() +
+  stat_smooth(method="glm", se=F,
+              method.args = list(family=binomial),
+              size = .5)+
+  stat_smooth(aes(x, population_pr), method="glm", se=F,
+              method.args = list(family=binomial),
+              size = 1)
+```
+
+The thick blue line shows the population curve we would expect while the thinner blue line is the simulated curve. Let's run this simulation 500 times.
+
+
+```{r, warnings=F, message=F}
+n_sim <- 500
+
+sim_data <- purrr::map_df(1:n_sim, function(iter) {
+  fake_data <- simulate_logit_model(200, alpha, beta)%>% 
+  mutate(population_pr = invlogit(alpha + beta*x)) %>% 
+    mutate(sim = paste0("sim_", iter)) %>% 
+    as_tibble()
+  return(fake_data)
+})
+
+sim_data %>% 
+  count(sim)
+
+sim_data %>% 
+  ggplot(aes(x, y)) +
+  geom_point() +
+  stat_smooth(aes(color=sim),method="glm", se=F,
+              method.args = list(family=binomial),
+              size = .25)+
+  stat_smooth(aes(x, population_pr), method="glm", se=F,
+              method.args = list(family=binomial),
+              size = 1.5) +
+  guides(color="none")
+```
+
+
+We can also fit a logistic regression for each simulation. 
+
+But first a quick aside on using broom. The [`broom` package](https://cran.r-project.org/web/packages/broom/vignettes/broom.html) takes messy output from commonly used R model fitting functions and transforms it into a tidy format. For example:
+
+```{r}
+library(broom)
+model_fit <- glm(y ~ x, family=binomial(link="logit"), data=fake_data) 
+
+tidy(model_fit)
+
+```
+
+This puts the coefficients along with their standard errors, test statistics and p-values into a `tibble.` You can also request confidence intervals which makes for easy plotting. 
+
+```{r}
+
+tidy_fit <- tidy(model_fit, conf.int = TRUE)
+ggplot(tidy_fit, aes(estimate, term, color = term)) +
+    geom_point() +
+    geom_errorbarh(aes(xmin = conf.low, xmax = conf.high)) +
+    geom_vline(xintercept = 0)
+
+```
+
+
+For our current task, we can fit a logistic regression model for each of our simulated data sets and store the coefficients in a tidy tibble with just 3 lines of code. 
+
+
+
+```{r}
+library(broom)
+fit_by_sim <- sim_data %>% 
+  group_by(sim) %>%
+  do(tidy(glm(y ~ x, ., family = binomial(link="logit"))))
+
+head(fit_by_sim)
+
+fit_by_sim %>%
+  filter(term == 'x') %>% 
+  ggplot(aes(estimate)) +
+    geom_histogram() +
+    geom_vline(xintercept = beta) # the population value
+  
+
+```
+
+Similar to our linear regression framework, we can estimate model where the effects of our coefficients aren't strictly increasing or descreasing. For example, in a hospital setting, it's often the case that both high and low values of a laboratory result are associated with a poor outcome. Let's simulate this scenario below and plot the fitted curve.
+
+```{r}
+sim_nonlinear_data = function(sample_size = 100, alpha = -1.5 , beta = .5) {
+  x = rnorm(n = sample_size)
+  linear_terms <-  alpha + beta * x + x ^ 2
+  probability <- invlogit(linear_terms)
+  y = rbinom(n = sample_size, size = 1, prob = probability)
+  return(tibble(y, x))
+}
+
+sim_data2 <- sim_nonlinear_data()
+model_fit <- glm(y ~ x + I(x^2), data = sim_data2, family = binomial)
+
+sim_data2 <- sim_data2 %>% 
+  mutate(predicted_value = predict(model_fit, ., type = "response"),
+         population_value = invlogit(-1.5 + .5*x + x^2))
+
+sim_data2 %>% 
+  ggplot(aes(x, y)) +
+   geom_line(aes(x, predicted_value, color = 'estimated curve'),
+              size = .25) +
+  geom_line(aes(x, population_value, color = 'population curve'),
+              size = 1.5) 
+```
+
+
+
+## Example with the NES data
+
+The NES data contains presedential voting preferences along with demographics for a sample of americans for every election from 1952 to 2000. 
+
+```{r}
+nes <- read.table('data/nes.txt', header=TRUE)
+
+DT::datatable(head(nes), options = list(scrollX=T))
+```
+
+
+
+### A simple model
+
+Here we fit a simple model for the probability of viting republican on a subset of the (year = 1992) using income and age as our inputs. 
+
+```{r}
+nes_1992 <- nes %>% 
+  filter(year == 1992)
+fit_1992 <- glm(rvote ~ income + age, family=binomial(link="logit"), data=nes_1992)
+
+coef(summary(fit_1992))
+```
+
+We see we can our estimates along with standard errors, our test statistics (z value) and a p-value. Here we reject the null hypothesis for both of our coefficients. 
+
+
+We can also get confidence intervals using a similar method as we did for linear regression
+
+```{r}
+confint(fit_1992, level = 0.95)
+
+```
+
+We can add in interactions with the `:` syntax.
+
+
+```{r}
+nes_1992 <- nes %>% 
+  filter(year == 1992)
+fit_1992 <- glm(rvote ~ income + age + income:age, family=binomial(link="logit"), data=nes_1992)
+
+coef(summary(fit_1992))
+```
+
+
+### Odds ratios
+
+Remember we can compute odds ratios by exponentiating the coefficients from our models. Here we show that we get the same result by doing that as calculating by hand. 
+
+Let's look at differences in gender for supporting either Bush or Clinton in 1992.
+
+```{r}
+# gender = 0 for male
+# gender = 1 for female
+
+nes_1992 %>% 
+  count(gender, rvote ) %>% 
+  ggplot(aes(rvote, n, fill = factor(gender) )) + 
+  geom_bar(stat = "identity", position='dodge') + 
+  ggtitle("Presidential Candidate support by gender") 
+  
+table(nes_1992$gender, nes_1992$rvote)
+
+```
+
+It seems those who responded with female as their gender tend to support the republican candidate less often. Let's calculate the odds ratio
+
+
+```{r}
+
+
+tab <- table(nes_1992$gender, nes_1992$rvote)
+knitr::kable(tab)
+
+
+female_republican_odds <- (tab[2,2]/(tab[2,2] + tab[2,1]))/(tab[2,1]/(tab[2,2] + tab[2,1]) )
+
+male_republican_odds <- (tab[1,2]/(tab[1,2] + tab[1,1]))/(tab[1,1]/(tab[1,1] + tab[1,2]) )
+
+
+or <- female_republican_odds/male_republican_odds
+
+
+gender_model <-  glm(rvote ~ gender, data = nes_1992,
+                   family = binomial(link = "logit"))
+ 
+
+
+print(female_republican_odds)
+print(male_republican_odds)
+print(or)
+
+
+summary(gender_model)
+
+coef(gender_model)[2]
+
+exp(coef(gender_model)[2])
+
+
+```
+
+
+
+## Logistic regression as a classifier
+
+
+
+
+## Evaluating the performance of a logistic regression
+
+So far we have looked at the output of a logistic regression model as a probability. In a predictive setting, we often want to use these probabilities to make some kind of decision. That is, we want to use the probabilities classify the output into 1 of 2 labels. In our running example, we may want to build a model to predict which candidate a potential voter will vote for and use that information to target people for donations. 
+
+If we use our model so far, we could make one of two potential errors:
+
+- Predict that a voter will vote for Bush when they voted for Clinton
+- Predict that a voter will vote for Clinton when they voted for Bush
+
+
+Let's continue on with our example, by adding a few more predictor variables and try to use it to determine who a potential voter will vote for (in 1992).
+
+
+```{r}
+
+# select the variables we wish to examine
+nes_1992 <- nes_1992 %>% 
+  dplyr::select(rvote , age, income, educ1, race , income, religion)
+
+# remove missing values
+nes_1992 <- nes_1992 %>% 
+  filter(complete.cases(nes_1992))
+
+# split data into training and testing sets
+
+set.seed(13453)
+n <- nrow(nes_1992)
+training_size <- .8
+split <- sample(1:nrow(nes_1992), floor(n*training_size), replace = F)
+
+train_df <- nes_1992 %>% 
+  slice(split)
+
+test_df <- nes_1992 %>% 
+  slice(-split)
+
+
+final_model <- glm(rvote ~ income + age + educ1 + factor(race) + factor(religion)
+                      , data = train_df, family = binomial)
+```
+
+## Model evaluation
+
+
+A common way to evaluate the performance of a classification task is through a confusion matrix as follows:
+
+```{r}
+
+perf <- matrix(c("a", "b", "c", "d"), nrow = 2)
+
+rownames(perf) <- c("Predicted No", "Predicted Yes")
+colnames(perf) <- c("Actual No", "Actual Yes")
+
+knitr::kable(perf)
+
+```
+
+
+We calculate the following performance measures:
+
+- *Sensitivity*: $\frac{d}{c + d}$
+- *Specificity*: $\frac{a}{a + b}$
+- *Positive Predictive Value*: $\frac{d}{b + d}$
+- *Positive Predictive Value*: $\frac{a}{a + c}$
+
+So in our example in words:
+
+- *Sensitivity* is the percentage of people who voted for Bush that the model identifies
+- *Specificity* is the percentage of people who voted for Clinton that the model identifies
+- *Positive Predictive Value* is the percentage of the time that a voter will vote for Bush when the model predicts that
+a voter will vote for Bush
+- *Negative Predictive Value* is the percentage of the time that a voter will vote for Clinton when the model predicts that
+a voter will vote for Clinton
+
+
+
+
+```{r, message=F, warning=F}
+train_df <- train_df %>% 
+  mutate(prediction = predict(final_model, train_df, type = "response"))
+
+cut_off <- .5
+
+
+train_df <- train_df %>% 
+  mutate(prediction_class = ifelse(prediction > cut_off, 1, 0))
+
+tab <- table(train_df$prediction_class, train_df$rvote)
+
+colnames(tab) <- c("Voted Clinton", "Voted Bush")
+rownames(tab) <- c("Predicted Clinton", "Predicted Bush")
+
+knitr::kable(tab)
+
+sensitivity <- round(tab[2,2]/(tab[1,2] +tab[2,2]), 3)
+specificity <- round(tab[1,1]/(tab[1,1] +tab[2,1]), 3)
+ppv <- round(tab[2,2]/(tab[2,1] +tab[2,2]), 3)
+npv <- round(tab[1,1]/(tab[1,1] +tab[1,2]), 3)
+
+df <- tibble(sensitivity = sensitivity,
+             specificity = specificity,
+             ppv = ppv,
+             npv = npv)
+
+DT::datatable(df, caption = "Voter Model results on training data (cut-off = .5)")
+
+```
+
+
+We could try a different cut-off value and obtain different results
+
+```{r}
+cut_off <- .7
+
+
+train_df <- train_df %>% 
+  mutate(prediction_class = ifelse(prediction > cut_off, 1, 0))
+
+tab <- table(train_df$prediction_class, train_df$rvote)
+
+colnames(tab) <- c("Voted Clinton", "Voted Bush")
+rownames(tab) <- c("Predicted Clinton", "Predicted Bush")
+
+knitr::kable(tab)
+
+sensitivity <- round(tab[2,2]/(tab[1,2] +tab[2,2]), 3)
+specificity <- round(tab[1,1]/(tab[1,1] +tab[2,1]), 3)
+ppv <- round(tab[2,2]/(tab[2,1] +tab[2,2]), 3)
+npv <- round(tab[1,1]/(tab[1,1] +tab[1,2]), 3)
+
+df <- tibble(sensitivity = sensitivity,
+             specificity = specificity,
+             ppv = ppv,
+             npv = npv)
+
+DT::datatable(df, caption = "Voter Model results on training data(cut-off=.7)")
+```
+
+
+
+We can get different performance by varying the metrics
+
+```{r}
+
+cutoffs <- seq(0.001, 0.999, length.out = 1000)
+
+performance <- list()
+
+for(i in cutoffs) {
+  train_df <- train_df %>% 
+  mutate(prediction_class = factor(ifelse(prediction > i, 1, 0), levels= c(0,1))) %>% 
+  mutate(presvote_binary = factor(rvote, levels = c(0,1)))
+
+tab <- table(train_df$prediction_class, train_df$rvote)
+
+
+sensitivity <- round(tab[2,2]/(tab[1,2] +tab[2,2]), 3)
+specificity <- round(tab[1,1]/(tab[1,1] +tab[2,1]), 3)
+ppv <- round(tab[2,2]/(tab[2,1] +tab[2,2]), 3)
+npv <- round(tab[1,1]/(tab[1,1] +tab[1,2]), 3)
+ovarall_accuracy <- (tab[1,1] + tab[2,2])/sum(tab)
+
+df <- tibble(cutoff = i,
+             ovarall_accuracy = ovarall_accuracy,
+             sensitivity = sensitivity,
+             specificity = specificity,
+             ppv = ppv,
+             npv = npv)
+
+performance[[as.character(i)]] <- df
+}
+
+performance <- do.call(rbind, performance)
+
+performance %>% 
+  ggplot(aes(cutoff, sensitivity, color = "sensitivity")) +
+  geom_line() +
+  geom_line(aes(cutoff, specificity, color = "specificity")) +
+  geom_line(aes(cutoff, ppv,color = "ppv")) +
+  geom_line(aes(cutoff, npv, color = "npv")) +
+  geom_line(aes(cutoff, ovarall_accuracy, color = "ovarall accuracy")) 
+```
+
+
+
+### ROC curve
+
+A curve used extensively in practice is the Receiver Operating Characteristics (ROC) curve. The ROC summarizes performance of the model under all thresholds according to two error metrics; True Positive Rate (Sensitivity) and False Positive Rate (1 - specificity). 
+
+Below is an ROC curve for the model we fit above.
+
+
+```{r}
+library(pROC)
+
+rocobj <- roc(train_df$rvote, train_df$prediction)
+
+g <- ggroc(rocobj)+ 
+    geom_segment(aes(x = 1, xend = 0, y = 0, yend = 1), color="grey", linetype="dashed")
+
+print(g)
+```
+
+
+The overall performance of a classifier, summarized over all possible thresholds, is given by the area under the ROC curve (or AUC). An AUC of .5 indicates a model that does no better than chance. The ROC for a model with a high AUC usually hugs the top left corner of the graph. Our AUC is 0.76, which is somewhere in between a great model and a model that is no better than chance. 
+
+#### Aside on performance metrics
+
+When choosing a threshold, not all error metrics are the same. In our toy example here (predicting who a voter will vote for), the consequences of the model making a mistake are quite low. What if our model was trying to predict patient deterioration in hospital? 
+
+Let's say we defined a classifier that predicts which patients will deteriorate in the next 48 hours and may need a transfer to an ICU. When the model predicts that a patient will deteriorate, it sends an alert message to all doctors and nurses caring for this patient. The clinicians then meet to review the patiet's status and discuss next steps. 
+
+These are the errors we can make
+
+- We can predict a patient will deteriorate, and they don't
+- We can predict that a patient will not deteriorate, and they do
+
+We may say, "We don't want to miss any patients who deteriorate", so we pick a threshold that gives us a very high sensitivity. This can unintended consequences. If our PPV is too low because we selected a high sensitivity threshold, the clinicians may get too many alarms and start to feel burnout. They may also stop trusting the alarms all together.
+
+The other situtation may be even worse. If we ensure that we have a high PPV, then we may "miss" a bunch of patients who deteriorate. The physicians again will stop trusting the algorithm, and you may not intervene on patients you could have saved.
+
+All this to say that
+- Non ML/stats experts generally say, give me a model with high accuracy. As we have seen, accuracy can be defined in several different ways. 
+- At the outset of a machine learning project, lay out all of the error metrics and explain to your collaborators the
+the consequences of each mistake (They may have to explain to you the consequences of each mistake)
+- Once your collaborators understand what is at stake, you can jointly select performance metrics that satisfies whatever criteria you agree to.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
