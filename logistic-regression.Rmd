@@ -65,6 +65,17 @@ summary(fit)
 
 ```
 
+Remember that there is no analytical solution for the coefficients in a logistic regression (as compared to OLS). We can check for convergence, however warnings will be displayed if there were issues during the model fitting process
+
+```{r}
+# did the model converge
+fit$converged
+
+# how many iterations 
+fit$iter
+```
+
+
 Let's plot the estimated logistic curve against the population curve. 
 
 
@@ -517,7 +528,7 @@ These are the errors we can make
 
 We may say, "We don't want to miss any patients who deteriorate", so we pick a threshold that gives us a very high sensitivity. This can unintended consequences. If our PPV is too low because we selected a high sensitivity threshold, the clinicians may get too many alarms and start to feel burnout. They may also stop trusting the alarms all together.
 
-The other situtation may be even worse. If we ensure that we have a high PPV, then we may "miss" a bunch of patients who deteriorate. The physicians again will stop trusting the algorithm, and you may not intervene on patients you could have saved.
+The other situation may be even worse. If we ensure that we have a high PPV, then we may "miss" a bunch of patients who deteriorate. The physicians again will stop trusting the algorithm, and you may not intervene on patients you could have saved.
 
 All this to say that
 - Non ML/stats experts generally say, give me a model with high accuracy. As we have seen, accuracy can be defined in several different ways. 

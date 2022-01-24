@@ -249,6 +249,13 @@ summary(fit)</code></pre>
 ## AIC: 194.32
 ## 
 ## Number of Fisher Scoring iterations: 5</code></pre>
+<p>Remember that there is no analytical solution for the coefficients in a logistic regression (as compared to OLS). We can check for convergence, however warnings will be displayed if there were issues during the model fitting process</p>
+<pre class="r"><code># did the model converge
+fit$converged</code></pre>
+<pre><code>## [1] TRUE</code></pre>
+<pre class="r"><code># how many iterations 
+fit$iter</code></pre>
+<pre><code>## [1] 5</code></pre>
 <p>Let’s plot the estimated logistic curve against the population curve.</p>
 <pre class="r"><code>fake_data &lt;- fake_data %&gt;% 
   mutate(population_pr = invlogit(alpha + beta*x))
@@ -751,7 +758,7 @@ print(g)</code></pre>
 <li>We can predict that a patient will not deteriorate, and they do</li>
 </ul>
 <p>We may say, “We don’t want to miss any patients who deteriorate”, so we pick a threshold that gives us a very high sensitivity. This can unintended consequences. If our PPV is too low because we selected a high sensitivity threshold, the clinicians may get too many alarms and start to feel burnout. They may also stop trusting the alarms all together.</p>
-<p>The other situtation may be even worse. If we ensure that we have a high PPV, then we may “miss” a bunch of patients who deteriorate. The physicians again will stop trusting the algorithm, and you may not intervene on patients you could have saved.</p>
+<p>The other situation may be even worse. If we ensure that we have a high PPV, then we may “miss” a bunch of patients who deteriorate. The physicians again will stop trusting the algorithm, and you may not intervene on patients you could have saved.</p>
 <p>All this to say that - Non ML/stats experts generally say, give me a model with high accuracy. As we have seen, accuracy can be defined in several different ways. - At the outset of a machine learning project, lay out all of the error metrics and explain to your collaborators the the consequences of each mistake (They may have to explain to you the consequences of each mistake) - Once your collaborators understand what is at stake, you can jointly select performance metrics that satisfies whatever criteria you agree to.</p>
 </div>
 </div>
